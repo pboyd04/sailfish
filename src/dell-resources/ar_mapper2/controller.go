@@ -30,17 +30,16 @@ type mapping struct {
 }
 
 type syncEvent interface {
-  Add(int)
-  Done()
+	Done()
 }
 
 type waiter interface {
-  Listen(context.Context, func(eh.Event) bool) (*eventwaiter.EventListener, error)
+	Listen(context.Context, func(eh.Event) bool) (*eventwaiter.EventListener, error)
 }
 
 type listener interface {
-  Inbox() <- chan eh.Event
-  Close()
+	Inbox() <-chan eh.Event
+	Close()
 }
 
 // individual mapping: only for bookkeeping
@@ -66,7 +65,7 @@ type ARService struct {
 	hashMu sync.RWMutex
 	hash   map[string][]update
 
-  ew     waiter
+	ew waiter
 }
 
 // post-processed and optimized update
@@ -87,12 +86,12 @@ func StartService(ctx context.Context, logger log.Logger, cfg *viper.Viper, cfgM
 		hash:          make(map[string][]update),
 	}
 
-  sp, err := event.NewESP(ctx, event.MatchAnyEvent(attributes.AttributeUpdated), event.SetListenerName("ar_service"))
-  if err != nil {
-    logger.Error("Failed to create new event stream processor", "err", err)
-    return nil, errors.New("Failed to create ESP")
-  }
-  arservice.ew = &sp.EW
+	sp, err := event.NewESP(ctx, event.MatchAnyEvent(attributes.AttributeUpdated), event.SetListenerName("ar_service"))
+	if err != nil {
+		logger.Error("Failed to create new event stream processor", "err", err)
+		return nil, errors.New("Failed to create ESP")
+	}
+	arservice.ew = &sp.EW
 
 	go sp.RunForever(func(event eh.Event) {
 		data, ok := event.Data().(*attributes.AttributeUpdatedData)
@@ -156,53 +155,53 @@ func (b breadcrumb) Close() {
 }
 
 type HTTP_code struct {
-  status_code int
-  err_message []string
+	status_code int
+	err_message []string
 }
 
 func (e HTTP_code) StatusCode() int {
-  return e.status_code
+	return e.status_code
 }
 
 func (e HTTP_code) ErrMessagE() []string {
-  return e.err_message
+	return e.err_message
 }
 
 func (e HTTP_code) Error() string {
-  return fmt.Sprintf("Request Error Message: %s, Return Code: %d", e.err_message, e.status_code)
+	return fmt.Sprintf("Request Error Message: %s, Return Code: %d", e.err_message, e.status_code)
 }
 
 func (b breadcrumb) UpdateRequest(ctx context.Context, property string, value interface{}, auth *domain.RedfishAuthorizationProperty) (interface{}, error) {
-  b.ars.hashMu.RLock()
-  defer b.ars.hashMu.RUnlock()
+	b.ars.hashMu.RLock()
+	defer b.ars.hashMu.RUnlock()
 
 	b.logger.Info("UpdateRequest", "property", property, "mappingName", b.mappingName)
 
-  reqIDs := []eh.UUID{}
-  responses := []attributes.AttributeUpdatedData{}
-  errs := []string{}
-  status_code := 200
-  patch_timeout := 3
+	reqIDs := []eh.UUID{}
+	responses := []attributes.AttributeUpdatedData{}
+	errs := []string{}
+	status_code := 200
+	patch_timeout := 3
 
-  l, err := b.ars.ew.Listen(ctx, func(event eh.Event) bool {
-    if event.EventType() != attributes.AttributeUpdated {
-      return false
-    }
-    _, ok := event.Data().(*attributes.AttributeUpdatedData)
-    if !ok {
-      return false
-    }
-    return true
-  })
-  if err != nil {
-    b.ars.logger.Error("Could not create listener", "err", err)
-    return nil, errors.New("Failed to make attribute updated event listener")
-  }
-  l.Name = "ar patch listener"
-  var listener listener
-  listener = l
+	l, err := b.ars.ew.Listen(ctx, func(event eh.Event) bool {
+		if event.EventType() != attributes.AttributeUpdated {
+			return false
+		}
+		_, ok := event.Data().(*attributes.AttributeUpdatedData)
+		if !ok {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		b.ars.logger.Error("Could not create listener", "err", err)
+		return nil, errors.New("Failed to make attribute updated event listener")
+	}
+	l.Name = "ar patch listener"
+	var listener listener
+	listener = l
 
-  defer listener.Close()
+	defer listener.Close()
 
 	mappings, ok := b.ars.modelmappings[b.mappingName]
 	if !ok {
@@ -227,43 +226,43 @@ func (b breadcrumb) UpdateRequest(ctx context.Context, property string, value in
 			Authorization: *auth,
 		}
 		b.ars.eb.PublishEvent(ctx, eh.NewEvent(attributes.AttributeUpdateRequest, data, time.Now()))
-    reqIDs = append(reqIDs, reqUUID)
+		reqIDs = append(reqIDs, reqUUID)
 		break
 	}
 
-  req_ct := len(reqIDs)
-  timer := time.NewTimer(time.Duration(patch_timeout*len(reqIDs)) * time.Second)
+	req_ct := len(reqIDs)
+	timer := time.NewTimer(time.Duration(patch_timeout*len(reqIDs)) * time.Second)
 
-  for {
-    select {
-    case event := <- listener.Inbox():
-      data, _ := event.Data().(*attributes.AttributeUpdatedData)
-      for i, reqID := range reqIDs {
-        if reqID == data.ReqID {
-          reqIDs[i] = reqIDs[len(reqIDs)-1]
-          reqIDs = reqIDs[:len(reqIDs)-1]
-          responses = append(responses, *data)
-          if (data.Error != "") {
-            errs = append(errs, data.Error)
-          }
-          break
-        }
-      }
-      if e, ok := event.(syncEvent); ok {
-        e.Done()
-      }
-      if (len(reqIDs) == 0) {
-        if len(errs) == req_ct {
-          status_code = 400
-        }
-        return nil, HTTP_code{status_code: status_code, err_message: errs}
-      }
-      case <- timer.C:
-        return nil, HTTP_code{status_code: 200, err_message: []string{"Timed out!"}}
-      case <- ctx.Done():
-        return nil, HTTP_code{status_code: 200, err_message: nil}
-    }
-  }
+	for {
+		select {
+		case event := <-listener.Inbox():
+			if e, ok := event.(syncEvent); ok {
+				e.Done()
+			}
+			data, _ := event.Data().(*attributes.AttributeUpdatedData)
+			for i, reqID := range reqIDs {
+				if reqID == data.ReqID {
+					reqIDs[i] = reqIDs[len(reqIDs)-1]
+					reqIDs = reqIDs[:len(reqIDs)-1]
+					responses = append(responses, *data)
+					if data.Error != "" {
+						errs = append(errs, data.Error)
+					}
+					break
+				}
+			}
+			if len(reqIDs) == 0 {
+				if len(errs) == req_ct {
+					status_code = 400
+				}
+				return nil, HTTP_code{status_code: status_code, err_message: errs}
+			}
+		case <-timer.C:
+			return nil, HTTP_code{status_code: 200, err_message: []string{"Timed out!"}}
+		case <-ctx.Done():
+			return nil, HTTP_code{status_code: 200, err_message: nil}
+		}
+	}
 }
 
 func (ars *ARService) resetConfig() {

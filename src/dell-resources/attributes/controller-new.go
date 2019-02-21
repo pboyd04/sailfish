@@ -3,17 +3,16 @@ package attributes
 import (
 	"context"
 	"errors"
+	"fmt"
+	eh "github.com/looplab/eventhorizon"
 	"strings"
 	"sync"
 	"time"
-  "fmt"
-	eh "github.com/looplab/eventhorizon"
-
 
 	"github.com/superchalupa/sailfish/src/log"
+	"github.com/superchalupa/sailfish/src/looplab/eventwaiter"
 	"github.com/superchalupa/sailfish/src/ocp/event"
 	"github.com/superchalupa/sailfish/src/ocp/model"
-  "github.com/superchalupa/sailfish/src/looplab/eventwaiter"
 	domain "github.com/superchalupa/sailfish/src/redfishresource"
 )
 
@@ -23,21 +22,20 @@ type Service struct {
 	cache          map[string][]*model.Model
 	logger         log.Logger
 	eb             eh.EventBus
-  ew             waiter
+	ew             waiter
 }
 
 type syncEvent interface {
-  Add(int)
-  Done()
+	Done()
 }
 
 type waiter interface {
-  Listen(context.Context, func(eh.Event) bool) (*eventwaiter.EventListener, error)
+	Listen(context.Context, func(eh.Event) bool) (*eventwaiter.EventListener, error)
 }
 
 type listener interface {
-  Inbox() <-chan eh.Event
-  Close()
+	Inbox() <-chan eh.Event
+	Close()
 }
 
 func StartService(ctx context.Context, logger log.Logger, eb eh.EventBus) (*Service, error) {
@@ -53,7 +51,7 @@ func StartService(ctx context.Context, logger log.Logger, eb eh.EventBus) (*Serv
 		logger.Error("Failed to create event stream processor", "err", err)
 		return nil, errors.New("Failed to create stream processor")
 	}
-  ret.ew = &sp.EW
+	ret.ew = &sp.EW
 
 	go sp.RunForever(func(event eh.Event) {
 		data, ok := event.Data().(*AttributeUpdatedData)
@@ -151,20 +149,20 @@ func getAttrValue(m *model.Model, group, gindex, name string) (ret interface{}, 
 }
 
 type HTTP_code struct {
-  status_code int
-  err_message []string
+	status_code int
+	err_message []string
 }
 
 func (e HTTP_code) StatusCode() int {
-  return e.status_code
+	return e.status_code
 }
 
 func (e HTTP_code) ErrMessage() []string {
-  return e.err_message
+	return e.err_message
 }
 
 func (e HTTP_code) Error() string {
-  return fmt.Sprintf("Request Error Message: %s, Return Code: %d", e.err_message, e.status_code)
+	return fmt.Sprintf("Request Error Message: %s, Return Code: %d", e.err_message, e.status_code)
 }
 
 func (b *breadcrumb) UpdateRequest(ctx context.Context, property string, value interface{}, auth *domain.RedfishAuthorizationProperty) (interface{}, error) {
@@ -173,31 +171,31 @@ func (b *breadcrumb) UpdateRequest(ctx context.Context, property string, value i
 
 	b.s.logger.Debug("UpdateRequest", "property", property, "value", value)
 
-  reqIDs := []eh.UUID{}
-  responses := []AttributeUpdatedData{}
-  status_code := 200
-  errs := []string{}
-  patch_timeout := 3
+	reqIDs := []eh.UUID{}
+	responses := []AttributeUpdatedData{}
+	status_code := 200
+	errs := []string{}
+	patch_timeout := 3
 
-  l, err := b.s.ew.Listen(ctx, func(event eh.Event) bool {
-    if event.EventType() != AttributeUpdated {
-      return false
-    }
-    _, ok := event.Data().(*AttributeUpdatedData)
-    if !ok {
-      return false
-    }
-    return true
-  })
-  if err != nil {
-    b.s.logger.Error("Could not create listener", "err", err)
-    return nil, errors.New("Failed to make attribute updated event listener")
-  }
-  l.Name = "patch listener"
-  var listener listener
-  listener = l
+	l, err := b.s.ew.Listen(ctx, func(event eh.Event) bool {
+		if event.EventType() != AttributeUpdated {
+			return false
+		}
+		_, ok := event.Data().(*AttributeUpdatedData)
+		if !ok {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		b.s.logger.Error("Could not create listener", "err", err)
+		return nil, errors.New("Failed to make attribute updated event listener")
+	}
+	l.Name = "patch listener"
+	var listener listener
+	listener = l
 
-  defer listener.Close()
+	defer listener.Close()
 
 	for k, v := range value.(map[string]interface{}) {
 		stuff := strings.Split(k, ".")
@@ -228,51 +226,51 @@ func (b *breadcrumb) UpdateRequest(ctx context.Context, property string, value i
 			Authorization: *auth,
 		}
 		b.s.eb.PublishEvent(ctx, eh.NewEvent(AttributeUpdateRequest, data, time.Now()))
-    reqIDs = append(reqIDs, reqUUID)
+		reqIDs = append(reqIDs, reqUUID)
 	}
 
-  req_ct := len(reqIDs)
-  // create a timer based on number of attributes to be patched
-  timer := time.NewTimer(time.Duration(patch_timeout*len(reqIDs)) * time.Second)
+	req_ct := len(reqIDs)
+	// create a timer based on number of attributes to be patched
+	timer := time.NewTimer(time.Duration(patch_timeout*len(reqIDs)) * time.Second)
 
-  for {
-    select {
-    case event := <- listener.Inbox():
-      data, _ := event.Data().(*AttributeUpdatedData)
-      for i, reqID := range reqIDs {
-        if reqID == data.ReqID {
-          //remove found reqid from list
-          reqIDs[i] = reqIDs[len(reqIDs)-1]
-          reqIDs = reqIDs[:len(reqIDs)-1]
-          responses = append(responses, *data)
-          if (data.Error != "") {
-            errs = append(errs, data.Error)
-          }
-          break
-        }
-      }
+	for {
+		select {
+		case event := <-listener.Inbox():
+			if e, ok := event.(syncEvent); ok {
+				e.Done()
+			}
 
-      if e, ok := event.(syncEvent); ok {
-        e.Done()
-      }
+			data, _ := event.Data().(*AttributeUpdatedData)
+			for i, reqID := range reqIDs {
+				if reqID == data.ReqID {
+					//remove found reqid from list
+					reqIDs[i] = reqIDs[len(reqIDs)-1]
+					reqIDs = reqIDs[:len(reqIDs)-1]
+					responses = append(responses, *data)
+					if data.Error != "" {
+						errs = append(errs, data.Error)
+					}
+					break
+				}
+			}
 
-      if (len(reqIDs) == 0) {
-        //all reqIDs found
-        if len(errs) == req_ct {
-          status_code = 400
-        }
-        http_response := HTTP_code{status_code: status_code, err_message: errs}
-        return nil, http_response
-      }
+			if len(reqIDs) == 0 {
+				//all reqIDs found
+				if len(errs) == req_ct {
+					status_code = 400
+				}
+				http_response := HTTP_code{status_code: status_code, err_message: errs}
+				return nil, http_response
+			}
 
-    case <- timer.C:
-      //time out for any attr updated events that we are still waiting for
-      return nil, HTTP_code{status_code: 200, err_message: []string{"Timed out!"}}
+		case <-timer.C:
+			//time out for any attr updated events that we are still waiting for
+			return nil, HTTP_code{status_code: 200, err_message: []string{"Timed out!"}}
 
-    case <- ctx.Done():
-      return nil, HTTP_code{status_code: 200, err_message: nil}
-    }
-  }
+		case <-ctx.Done():
+			return nil, HTTP_code{status_code: 200, err_message: nil}
+		}
+	}
 }
 
 func (b *breadcrumb) Close() {
