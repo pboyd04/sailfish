@@ -28,7 +28,6 @@ type GET struct {
 	CmdID        eh.UUID `json:"cmdid"`
 	HTTPEventBus eh.EventBus
 	auth         *RedfishAuthorizationProperty
-	outChan      chan<- CompletionEvent
 }
 
 func (c *GET) AggregateType() eh.AggregateType { return AggregateType }
@@ -36,11 +35,6 @@ func (c *GET) AggregateID() eh.UUID            { return c.ID }
 func (c *GET) CommandType() eh.CommandType     { return GETCommand }
 func (c *GET) SetAggID(id eh.UUID)             { c.ID = id }
 func (c *GET) SetCmdID(id eh.UUID)             { c.CmdID = id }
-
-func (c *GET) UseEventChan(out chan<- CompletionEvent) {
-	c.outChan = out
-}
-
 func (c *GET) SetUserDetails(a *RedfishAuthorizationProperty) string {
 	c.auth = a
 	return "checkMaster"
@@ -58,9 +52,6 @@ func (c *GET) Handle(ctx context.Context, a *RedfishResourceAggregate) error {
 		data.Headers[k] = v
 	}
 
-	var complete func()
-	complete = func() { a.ResultsCacheMu.RUnlock() }
-
 	// loop until something interesting happens
 	for {
 		// assume cache HIT
@@ -73,12 +64,9 @@ func (c *GET) Handle(ctx context.Context, a *RedfishResourceAggregate) error {
 			fmt.Printf(".")
 			data.Results = a.ResultsCache
 			data.StatusCode = a.StatusCode
-			if c.outChan != nil {
-				c.outChan <- CompletionEvent{event: eh.NewEvent(HTTPCmdProcessed, data, time.Now()), complete: complete}
-			} else {
-				// if we can't send the completion event, we'll leave a lock hanging, so just complete ourselves.
-				complete()
-			}
+
+			c.HTTPEventBus.PublishEvent(ctx, eh.NewEvent(HTTPCmdProcessed, data, time.Now()))
+			a.ResultsCacheMu.RUnlock()
 			return nil
 		}
 		a.ResultsCacheMu.RUnlock()
