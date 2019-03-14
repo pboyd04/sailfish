@@ -54,7 +54,7 @@ func RegisterAggregate(s *testaggregate.Service) {
 				&domain.CreateRedfishResource{
 					ResourceURI: vw.GetURI(),
 					Type:        "#Power.v1_0_2.Power",
-					Context:     params["rooturi"].(string) + "/$metadata#Power.PowerSystem.Chassis.1/Power/$entity",
+					Context:     params["rooturi"].(string) + "/$metadata#Power.Power",
 					Privileges: map[string]interface{}{
 						"GET": []string{"Login"},
 					},
