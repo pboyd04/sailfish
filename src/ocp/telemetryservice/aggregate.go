@@ -32,10 +32,10 @@ func RegisterAggregate(s *testaggregate.Service) {
 							"#TelemetryService.SubmitTestMetricReport": map[string]interface{}{
 								"target": vw.GetActionURI("submit.test.metric.report"),
 							},
-							"Oem": map[string]interface{}{},
-							"MetricReportDefinitions": map[string]interface{}{"@odata.id": vw.GetURI() + "/MetricReportDefinitions"},
-							"MetricReports":           map[string]interface{}{"@odata.id": vw.GetURI() + "/MetricReports"},
 						},
+						"Oem": map[string]interface{}{},
+						"MetricReportDefinitions": map[string]interface{}{"@odata.id": vw.GetURI() + "/MetricReportDefinitions"},
+						"MetricReports":           map[string]interface{}{"@odata.id": vw.GetURI() + "/MetricReports"},
 					}},
 
 				&domain.UpdateRedfishResourceProperties{
